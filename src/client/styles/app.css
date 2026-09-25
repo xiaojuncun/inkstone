@@ -583,6 +583,9 @@
   background: var(--border-subtle);
 }
 .mobile-note-list [role='presentation'] > .motion-note-row {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
   margin: 0;
   padding: 14px 36px 14px 0;
   border: 0;

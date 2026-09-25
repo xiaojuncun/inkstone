@@ -247,7 +247,7 @@ export function NoteList() {
         {view === 'trash' && notes.length > 0 && (<button type="button" disabled={emptyingTrash} aria-busy={emptyingTrash} onClick={() => void emptyTrash()} className="mt-2 w-full rounded-[var(--r-md)] border border-[var(--border-subtle)] py-1.5 text-[11.5px] text-[var(--text-tertiary)] transition-colors hover:border-[var(--danger)] hover:text-[var(--danger)] disabled:pointer-events-none disabled:opacity-50">{t("notes.empty_trash")}{notes.length}{t("notes.notes_93aeb9")}</button>)}
       </header>
 
-      <div key={`${view}:${folderId ?? ''}:${tag ?? ''}`} ref={listRef} role="listbox" aria-label={title} aria-multiselectable="true" aria-activedescendant={activeNoteId && renderedIds.has(activeNoteId) ? `note-option-${activeNoteId}` : undefined} tabIndex={0} onKeyDown={onKeyDown} className="anim-view-content min-h-0 flex-1 overflow-y-auto px-2 pb-4 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent)]">
+      <div key={`${view}:${folderId ?? ''}:${tag ?? ''}`} ref={listRef} role="listbox" aria-label={title} aria-multiselectable="true" aria-activedescendant={breakpoint !== "mobile" && activeNoteId && renderedIds.has(activeNoteId) ? `note-option-${activeNoteId}` : undefined} tabIndex={breakpoint === "mobile" ? -1 : 0} onKeyDown={onKeyDown} className="anim-view-content min-h-0 flex-1 overflow-y-auto px-2 pb-4 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent)]">
         {!hydrated && loading ? (<NoteListSkeleton />) : filtered.length === 0 ? (<ListEmpty view={view} filtering={Boolean(filter)}/>) : (groups.map((group) => (<div key={group.key} role="group" aria-label={group.label ?? title}>
               {group.label && (<div className="px-2 pt-3 pb-1 text-[10.5px] font-semibold tracking-[0.06em] text-[var(--text-quaternary)]">
                   {group.label}
@@ -298,6 +298,17 @@ const NoteRow = memo(function NoteRow({ note, highlight, density, tagColors, pos
     const [moveOpen, setMoveOpen] = useState(false);
     const purgeRef = useRef(false);
     const [purging, setPurging] = useState(false);
+  const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const isLongPressTriggeredRef = useRef(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+
+  const clearTouchTimer = () => {
+    if (touchTimerRef.current) {
+      clearTimeout(touchTimerRef.current);
+      touchTimerRef.current = null;
+    }
+  };
     const inTrash = Boolean(note.deletedAt);
     const purge = async () => {
         if (purgeRef.current)
@@ -371,10 +382,10 @@ const NoteRow = memo(function NoteRow({ note, highlight, density, tagColors, pos
             } satisfies MenuItem] : []),
             ...(breakpoint === 'mobile' ? [{
                 id: 'multi-select',
-                label: t("notes.add_to_selection"),
+                label: selectedIds.includes(note.id) ? t("notes.deselect") : t("notes.add_to_selection"),
                 icon: <CheckSquare2 size={13}/>,
-                disabled: selectedIds.includes(note.id),
-                onSelect: () => toggleSelected(note.id, true),
+                disabled: false,
+                onSelect: () => toggleSelected(note.id, !selectedIds.includes(note.id)),
             } satisfies MenuItem] : []),
             {
                 id: 'pin',
@@ -417,10 +428,57 @@ const NoteRow = memo(function NoteRow({ note, highlight, density, tagColors, pos
         ];
     const titleParts = splitByRanges(note.title || t("common.untitled_note"), highlight);
     return (<>
-      <div id={`note-option-${note.id}`} role="option" aria-selected={active || selected} aria-posinset={position} aria-setsize={total} tabIndex={-1} data-note-id={note.id} draggable style={{ contentVisibility: 'auto', containIntrinsicSize: density === 'compact' ? 'auto 42px' : 'auto 72px' }} onDragStart={(e) => {
+      <div ref={rowRef} id={`note-option-${note.id}`} role="option" aria-haspopup="menu" aria-selected={active || selected} aria-posinset={position} aria-setsize={total} tabIndex={breakpoint === "mobile" ? 0 : -1} data-note-id={note.id} draggable style={{ contentVisibility: 'auto', containIntrinsicSize: density === 'compact' ? 'auto 42px' : 'auto 72px' }} onDragStart={(e) => {
             e.dataTransfer.setData('application/x-inkstone-note', note.id);
             e.dataTransfer.effectAllowed = 'move';
-        }} onClick={(event) => {
+        }} onTouchStart={(e) => {
+        if (breakpoint !== "mobile") return;
+        isLongPressTriggeredRef.current = false;
+        const touch = e.touches[0];
+        if (!touch) return;
+        touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
+        clearTouchTimer();
+        touchTimerRef.current = setTimeout(() => {
+          isLongPressTriggeredRef.current = true;
+          if (navigator.vibrate) navigator.vibrate(20);
+          rowRef.current?.blur();
+          setMenuOpen(true);
+          const swallow = (e: Event) => {
+            e.preventDefault();
+            e.stopPropagation();
+          };
+          // 连续 400ms 内全面捕获并销毁所有触摸抬起与点击事件
+          const events = ["touchend", "touchcancel", "pointerup", "pointercancel", "click"];
+          events.forEach(ev => window.addEventListener(ev, swallow, { capture: true, passive: false }));
+          setTimeout(() => {
+            events.forEach(ev => window.removeEventListener(ev, swallow, { capture: true }));
+          }, 400);
+        }, 500);
+      }}
+      onTouchMove={(e) => {
+        if (!touchStartPosRef.current) return;
+        const touch = e.touches[0];
+        if (!touch) return;
+        const dx = Math.abs(touch.clientX - touchStartPosRef.current.x);
+        const dy = Math.abs(touch.clientY - touchStartPosRef.current.y);
+        if (dx > 10 || dy > 10) {
+          clearTouchTimer();
+        }
+      }}
+      onTouchEnd={() => {
+        clearTouchTimer();
+      }}
+      onTouchCancel={() => {
+        clearTouchTimer();
+      }}
+      onClick={(event) => {
+        if (isLongPressTriggeredRef.current) {
+          event.preventDefault();
+          event.stopPropagation();
+          isLongPressTriggeredRef.current = false;
+          return;
+        }
+
             if (event.altKey && breakpoint === 'desktop') {
                 event.preventDefault();
                 void openNote(note.id, { pane: 'secondary' });
@@ -437,8 +495,15 @@ const NoteRow = memo(function NoteRow({ note, highlight, density, tagColors, pos
             }
             void openNote(note.id);
         }} onContextMenu={(event) => {
-            setMenuOpen(false);
-            menu.onContextMenu(event);
+            event.preventDefault();
+            event.stopPropagation();
+            clearTouchTimer();
+            if (breakpoint === "mobile") {
+              setMenuOpen(true);
+            } else {
+              setMenuOpen(false);
+              menu.onContextMenu(event);
+            }
         }} className={cn('motion-note-row group relative cursor-default rounded-[var(--r-md)] border border-transparent px-2.5 pr-11 transition-[background-color,border-color,box-shadow,transform] duration-[var(--dur-fast)] md:pr-10', density === 'compact' ? 'py-[7px]' : 'py-2.5', selectionHighlighted
             ? 'bg-[var(--accent-soft)] ring-1 ring-[var(--accent)]/40'
             : active
@@ -491,7 +556,10 @@ const NoteRow = memo(function NoteRow({ note, highlight, density, tagColors, pos
       </div>
 
       {menu.point && <Menu anchor={menu.point} open onClose={menu.close} items={items}/>}
-      <Menu anchor={menuButtonRef} open={menuOpen} onClose={() => setMenuOpen(false)} items={items} align="end" width={240}/>
+      <Menu anchor={breakpoint === "mobile" ? rowRef : menuButtonRef} open={menuOpen} onClose={() => {
+        setMenuOpen(false);
+        setTimeout(() => rowRef.current?.focus({ preventScroll: true }), 50);
+      }} items={items} align="end" width={240}/>
       {moveOpen && <FolderPicker open title={t("notes.move_to_folder")} folders={folders} currentId={note.folderId} rootLabel={t("notes.remove_from_folder")} onSelect={(folderId) => void patchNote(note.id, { folderId })} onClose={() => setMoveOpen(false)}/>}
     </>);
 });

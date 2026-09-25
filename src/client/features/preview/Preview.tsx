@@ -50,6 +50,23 @@ export const Preview = memo(function Preview({
   onRendered,
   className,
 }: PreviewProps) {
+
+  useEffect(() => {
+    // 当切换笔记或打开笔记时，等 DOM 渲染完成后，强行将 VoiceOver 焦点拉到正文开头
+    const timer = setTimeout(() => {
+      const host = hostRef.current;
+      if (host) {
+        if (internalScrollerRef.current) internalScrollerRef.current.scrollTop = 0;
+        // 聚焦正文内的首个具体语义元素（标题、段落等），避免整篇大容器导致 VoiceOver 左右滑动锁死
+        const firstEl = (host.querySelector('h1, h2, h3, h4, p, li, blockquote') || host) as HTMLElement;
+        if (!firstEl.hasAttribute('tabindex')) {
+          firstEl.setAttribute('tabindex', '-1');
+        }
+        firstEl.focus({ preventScroll: true });
+      }
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [noteId]);
   const hostRef = useRef<HTMLDivElement>(null)
   const internalScrollerRef = useRef<HTMLDivElement>(null)
   const scrollerRef = externalScrollerRef ?? internalScrollerRef
@@ -386,6 +403,7 @@ export const Preview = memo(function Preview({
         onKeyDown={onKeyDown}
         data-font={settings.appearance.proseFont}
         data-preview-content
+        tabIndex={-1}
         className="ink-prose"
         dangerouslySetInnerHTML={htmlObj}
       />

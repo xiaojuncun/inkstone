@@ -195,14 +195,20 @@ export function Workspace({ onMobileBack, pane = 'active', grouped = false, }: {
     useEffect(() => {
         if (!note || !paneActive || !showEditor)
             return;
-        const frame = window.requestAnimationFrame(() => {
-            if (!note.title)
+        const timer = setTimeout(() => {
+            if (!note.title) {
                 titleInputRef.current?.focus();
-            else if (!isMobile)
-                view?.focus();
-        });
-        return () => window.cancelAnimationFrame(frame);
-    }, [note?.id, paneActive, view, showEditor, isMobile]);
+            } else {
+                if (view) {
+                    view.focus();
+                } else {
+                    const cmContent = document.querySelector<HTMLElement>('.cm-content');
+                    cmContent?.focus();
+                }
+            }
+        }, 120);
+        return () => clearTimeout(timer);
+    }, [note?.id, paneActive, view, showEditor]);
     if (!note)
         return <NoNoteSelected onCreate={() => void createContextualNote()}/>;
     if (!loaded) {

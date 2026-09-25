@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef } from 'react';
+import { useState, lazy, Suspense, useEffect, useRef } from 'react';
 import { Eye, FileText, PanelLeft, PencilLine, UserRound } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { registerAll } from '../../lib/hotkeys';
@@ -133,6 +133,51 @@ function MobileShell() {
     const setPane = useUi((s) => s.setMobilePane);
     const activeNoteId = useUi((s) => s.activeNoteId);
     const notePane = pane === 'editor' || pane === 'preview';
+
+    const [navShielded, setNavShielded] = useState(false);
+
+    const handleBackToList = () => {
+        const targetId = activeNoteId;
+        // 1. 屏蔽底部导航栏 250ms，彻底禁止 VoiceOver 捕捉“当前页面”
+        setNavShielded(true);
+        setPane('list');
+
+        if (targetId) {
+            const pullFocus = () => {
+                const el = document.querySelector<HTMLElement>(`[data-note-id="${targetId}"]`);
+                if (el && !el.closest("[inert]")) {
+                    el.scrollIntoView({ block: 'nearest' });
+                    el.focus();
+                    return true;
+                }
+                return false;
+            };
+
+            // 多段拉焦，确保穿透动画完全吸住光标
+            setTimeout(() => {
+                pullFocus();
+                setTimeout(() => {
+                    pullFocus();
+                    setNavShielded(false);
+                }, 120);
+            }, 60);
+        } else {
+            setTimeout(() => setNavShielded(false), 200);
+        }
+    };
+
+    useEffect(() => {
+        if (!notePane) return;
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                handleBackToList();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown, { capture: true });
+        return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
+    }, [notePane, activeNoteId]);
     useEffect(() => {
         if (pane === 'nav' || (!activeNoteId && notePane))
             setPane('list');
@@ -152,11 +197,11 @@ function MobileShell() {
           <NoteList />
         </div>
         <div aria-hidden={!notePane} inert={!notePane} data-active={notePane || undefined} data-from="right" className="mobile-pane-layer absolute inset-0">
-          {notePane && activeNoteId && (<Suspense fallback={<WorkspaceFallback />}><Workspace onMobileBack={() => setPane('list')}/></Suspense>) }
+          {notePane && activeNoteId && (<Suspense fallback={<WorkspaceFallback />}><Workspace onMobileBack={handleBackToList}/></Suspense>) }
         </div>
       </div>
 
-      <nav aria-label={t("shell.mobile_navigation")} className="mobile-bottom-nav flex h-[calc(64px+env(safe-area-inset-bottom))] shrink-0 items-stretch justify-around border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] pb-[env(safe-area-inset-bottom)]">
+      <nav aria-hidden={navShielded || undefined} inert={navShielded || undefined} aria-label={t("shell.mobile_navigation")} className="mobile-bottom-nav flex h-[calc(64px+env(safe-area-inset-bottom))] shrink-0 items-stretch justify-around border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] pb-[env(safe-area-inset-bottom)]">
         {tabs.map((tab) => (<button key={tab.id} type="button" disabled={!activeNoteId && (tab.id === 'editor' || tab.id === 'preview')} aria-current={pane === tab.id ? 'page' : undefined} onClick={() => setPane(tab.id)} className={cn('flex min-w-0 flex-1 items-center justify-center text-[12px] transition-colors disabled:opacity-40', pane === tab.id ? 'text-[var(--accent)]' : 'text-[var(--text-tertiary)]')}>
             <span className="mobile-tab-content">{tab.icon}<span>{tab.label}</span></span>
           </button>))}

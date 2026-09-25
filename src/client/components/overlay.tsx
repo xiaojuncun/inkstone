@@ -271,6 +271,10 @@ export function Menu({ anchor, open, onClose, items, align = 'start', width = 20
     label?: string;
 }) {
     const menuRef = useRef<HTMLDivElement>(null);
+    const mountTimeRef = useRef(Date.now());
+    useEffect(() => {
+        if (open) mountTimeRef.current = Date.now();
+    }, [open]);
     const [position, setPosition] = useState<{
         top: number;
         left: number;
@@ -309,30 +313,51 @@ export function Menu({ anchor, open, onClose, items, align = 'start', width = 20
             top = Math.max(viewport.top + margin, (point ? point.y : (anchorRef?.current?.getBoundingClientRect().top ?? top)) - height - 5);
         left = Math.min(Math.max(viewport.left + margin, left), viewport.right - menuWidth - margin);
         setPosition({ top, left, origin: `${flipUp ? 'bottom' : 'top'} ${align === 'end' ? 'right' : 'left'}` });
-        setCursor(items.findIndex((i) => !i.disabled));
+        const firstActive = items.findIndex((i) => !i.disabled);
+        setCursor(firstActive >= 0 ? firstActive : 0);
     }, [open, items, align, menuWidth, anchorRef, point]);
     useEscape(open, onClose);
     useClickOutside(anchorRef ? [menuRef, anchorRef] : [menuRef], open, onClose);
     useEffect(() => {
         if (!open)
             return;
-        const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        const rootEl = document.getElementById("root");
+        if (rootEl) rootEl.setAttribute("aria-hidden", "true");
         return () => {
-            if (previousFocus?.isConnected)
-                previousFocus.focus({ preventScroll: true });
+            if (rootEl) rootEl.removeAttribute("aria-hidden");
         };
     }, [open]);
     useEffect(() => {
         if (!open)
             return;
-        if (cursor < 0) {
-            menuRef.current?.focus({ preventScroll: true });
-            return;
-        }
-        menuRef.current
-            ?.querySelector<HTMLElement>(`[data-menu-index="${cursor}"]`)
-            ?.focus({ preventScroll: true });
-    }, [open, cursor]);
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const doFocus = () => {
+            const targetIndex = cursor >= 0 ? cursor : items.findIndex(i => !i.disabled);
+            const target = targetIndex >= 0 
+                ? menuRef.current?.querySelector<HTMLElement>(`[data-menu-index="${targetIndex}"]`)
+                : null;
+            if (target) {
+                target.focus({ preventScroll: true });
+            } else {
+                menuRef.current?.focus({ preventScroll: true });
+            }
+        };
+
+        doFocus();
+        const raf = requestAnimationFrame(() => {
+            doFocus();
+            timer = setTimeout(() => {
+                doFocus();
+                const firstBtn = menuRef.current?.querySelector<HTMLButtonElement>("button[role^='menuitem']:not([disabled])");
+                firstBtn?.focus({ preventScroll: true });
+            }, 80);
+        });
+
+        return () => {
+            cancelAnimationFrame(raf);
+            if (timer) clearTimeout(timer);
+        };
+    }, [open, cursor, items]);
     useEffect(() => {
         if (!open)
             return;
@@ -371,10 +396,17 @@ export function Menu({ anchor, open, onClose, items, align = 'start', width = 20
     }, [open, items, cursor, onClose]);
     if (!open)
         return null;
-    return createPortal(<div ref={menuRef} role="menu" aria-label={label} tabIndex={-1} className="anim-pop fixed z-[260] max-h-[420px] overflow-y-auto rounded-[var(--r-lg)] border border-[var(--border-default)] bg-[var(--bg-overlay)] p-1 shadow-[var(--shadow-pop)] outline-none" style={{ top: position.top, left: position.left, width: menuWidth, transformOrigin: position.origin }}>
+    return createPortal(
+      <div className="fixed inset-0 z-[260] overflow-hidden pointer-events-auto">
+        <div className="absolute inset-0" onClick={() => {
+          // 防止长按抬手瞬间的点击误关菜单
+          if (Date.now() - mountTimeRef.current < 300) return;
+          onClose();
+        }} aria-hidden="true" />
+        <div ref={menuRef} role="menu" aria-label={label} aria-modal="true" tabIndex={-1} className="anim-pop absolute max-h-[420px] overflow-y-auto rounded-[var(--r-lg)] border border-[var(--border-default)] bg-[var(--bg-overlay)] p-1 shadow-[var(--shadow-pop)] outline-none" style={{ top: position.top, left: position.left, width: menuWidth, transformOrigin: position.origin }}>
       {items.map((item, index) => (<div key={item.id}>
           {item.separatorBefore && <div role="separator" className="my-1 h-px bg-[var(--border-subtle)]"/>}
-          <button type="button" role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={item.checked === undefined ? undefined : item.checked} tabIndex={index === cursor ? 0 : -1} data-menu-index={index} disabled={item.disabled} onMouseEnter={() => {
+          <button type="button" autoFocus={open && index === (cursor >= 0 ? cursor : items.findIndex(i => !i.disabled))} role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={item.checked === undefined ? undefined : item.checked} tabIndex={index === cursor ? 0 : -1} data-menu-index={index} disabled={item.disabled} onMouseEnter={() => {
                 if (!item.disabled)
                     setCursor(index);
             }} onClick={() => {
@@ -393,7 +425,8 @@ export function Menu({ anchor, open, onClose, items, align = 'start', width = 20
             {item.combo && <Kbd combo={item.combo}/>}
           </button>
         </div>))}
-    </div>, document.body);
+        </div>
+      </div>, document.body);
 }
 export function useContextMenu() {
     const [point, setPoint] = useState<{
