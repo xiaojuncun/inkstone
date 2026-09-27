@@ -453,7 +453,7 @@ const NoteRow = memo(function NoteRow({ note, highlight, density, tagColors, pos
           setTimeout(() => {
             events.forEach(ev => window.removeEventListener(ev, swallow, { capture: true }));
           }, 400);
-        }, 500);
+        }, 320);
       }}
       onTouchMove={(e) => {
         if (!touchStartPosRef.current) return;
